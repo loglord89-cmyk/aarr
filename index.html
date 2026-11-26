@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RT Game Mode</title>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0710; --panel:#150e22; --line:#3a2760; --ink:#efe9fb; --mute:#a99bc8;
+    --accent:#a45cff; --accent-ink:#12041f; --ok:#7be0a3; --bad:#ff8d8d;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f2fd; --panel:#ffffff; --line:#d6c8f0; --ink:#1b1030; --mute:#6c5a90;
+    --accent:#7a2fe0; --accent-ink:#ffffff; --ok:#1f8f55; --bad:#c23b3b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.7 Vazirmatn,Tahoma,sans-serif;padding:24px 16px 64px}
+  main{max-width:760px;margin:0 auto}
+  h1{font-size:34px;font-weight:800;margin:0 0 4px}
+  .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .sub{color:var(--mute);margin:0 0 28px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:16px}
+  label{display:block;font-weight:600;margin:0 0 6px}
+  input,textarea,select{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font:inherit}
+  input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  textarea{min-height:110px;resize:vertical}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:200px}
+  .field{margin-bottom:16px}
+  .field:last-child{margin-bottom:0}
+  button{font:600 16px Vazirmatn,Tahoma,sans-serif;border:0;border-radius:6px;padding:11px 22px;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:wait}
+  .status{display:inline-flex;align-items:center;gap:8px;color:var(--mute);margin-inline-start:12px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--ok)}
+  #log{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px;min-height:120px;max-height:320px;overflow:auto;white-space:pre-wrap;font-size:14px;color:var(--mute)}
+  #log .a1{color:var(--accent)} #log .a2{color:var(--ok)} #log .err{color:var(--bad)}
+  .file{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin-top:8px}
+  .file span{direction:ltr;unicode-bidi:plaintext;overflow-wrap:anywhere}
+  .hint{color:var(--mute);font-size:14px;margin:6px 0 0}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1>RT Game Mode</h1><button class="ghost" id="theme" type="button">حالت روشن</button></div>
+  <p class="sub">بنویس چه مودی می‌خوای. هوش مصنوعی اول توی بلندر مدل رو می‌سازه، هوش مصنوعی دوم کد مود رو می‌نویسه.</p>
+
+  <section class="panel">
+    <div class="field">
+      <label for="key">کلید API (از console.anthropic.com)</label>
+      <input id="key" type="password" dir="ltr" placeholder="sk-ant-..." autocomplete="off">
+      <p class="hint">کلید فقط توی مرورگر خودت روی همین کامپیوتر ذخیره می‌شه.</p>
+    </div>
+    <div class="field">
+      <button class="ghost" id="ping">بررسی اتصال به بلندر</button>
+      <span class="status"><span class="dot" id="dot"></span><span id="pingText">بررسی نشده</span></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="field">
+      <label for="req">چه مودی می‌خوای؟</label>
+      <textarea id="req" placeholder="مثلاً: یه ماشین پلیس سیاه‌وسفید با دکمه‌ی نیترو"></textarea>
+    </div>
+    <div class="row field">
+      <div>
+        <label for="target">نوع مود</label>
+        <select id="target">
+          <option value="sp">تک‌نفره (ScriptHookVDotNet، C#)</option>
+          <option value="fivem">سرور FiveM (Lua)</option>
+        </select>
+      </div>
+      <div>
+        <label for="useBlender">مدل‌سازی در بلندر</label>
+        <select id="useBlender">
+          <option value="1">بله</option>
+          <option value="0">نه، فقط کد مود</option>
+        </select>
+      </div>
+    </div>
+    <button id="run">شروع بساز</button>
+  </section>
+
+  <section class="panel">
+    <label>پیشرفت</label>
+    <div id="log">منتظر دستور...</div>
+  </section>
+
+  <section class="panel" id="outPanel" hidden>
+    <label>مود آماده</label>
+    <div id="files"></div>
+  </section>
+</main>
+
+<script>
+const MODEL = "claude-sonnet-5-5";
+const BRIDGE = "http://127.0.0.1:9877";
+const $ = id => document.getElementById(id);
+$("key").value = localStorage.getItem("gta_key") || "";
+function applyTheme(t){
+  document.documentElement.dataset.theme = t;
+  $("theme").textContent = t === "light" ? "حالت تیره" : "حالت روشن";
+  try { localStorage.setItem("rt_theme", t); } catch (e) {}
+}
+$("theme").onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+applyTheme(localStorage.getItem("rt_theme") || "dark");
+
+function log(msg, cls = "") {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = msg;
+  const box = $("log");
+  if (box.textContent === "منتظر دستور...") box.textContent = "";
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function claude(body) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": $("key").value.trim(),
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({ model: MODEL, ...body })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || ("خطای " + r.status));
+  return data;
+}
+
+async function blender(code) {
+  try {
+    const r = await fetch(BRIDGE + "/run", { method: "POST", headers: { "Content-Type": "text/plain" }, body: code });
+    return (await r.text()).slice(0, 6000);
+  } catch (e) {
+    return "ERROR: بلندر جواب نمی‌ده. افزونه‌ی GTA AI Bridge فعاله؟";
+  }
+}
+
+async function ping() {
+  try {
+    const r = await fetch(BRIDGE + "/ping");
+    if (!r.ok) throw 0;
+    $("dot").className = "dot on"; $("pingText").textContent = "به بلندر وصله";
+    return true;
+  } catch (e) {
+    $("dot").className = "dot"; $("pingText").textContent = "وصل نیست";
+    return false;
+  }
+}
+$("ping").onclick = ping;
+
+const BLENDER_TOOL = {
+  name: "run_blender_python",
+  description: "Execute Python (bpy) code inside the running Blender. Use print() to return info. Returns output or an error.",
+  input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"] }
+};
+
+const BLENDER_SYSTEM = `You are a 3D artist agent controlling Blender through Python (bpy).
+Goal: build game-ready assets for GTA V from the user's request.
+Rules:
+- Low-to-mid poly, clean topology, real-world scale in meters, origin at base/center.
+- Sensible object names without spaces; separate objects for parts that move (wheels, doors).
+- Add simple materials and UV unwrap each mesh. Add a collision mesh object where relevant.
+- Work in small steps, check with print(), fix your own errors.
+- Finally try to export with the Sollumz addon (bpy.ops.sollumz.* operators) into os.path.expanduser('~/GTA_Mod_Output/models'). If Sollumz is missing or fails, say so clearly.
+- End with a short plain report in Persian: asset names, exported files, and what the user must do manually.`;
+
+async function blenderAgent(request) {
+  const messages = [{ role: "user", content: request }];
+  for (let i = 0; i < 25; i++) {
+    const resp = await claude({ max_tokens: 4096, system: BLENDER_SYSTEM, tools: [BLENDER_TOOL], messages });
+    messages.push({ role: "assistant", content: resp.content });
+    if (resp.stop_reason !== "tool_use") return resp.content.filter(b => b.type === "text").map(b => b.text).join("");
+    const results = [];
+    for (const b of resp.content) {
+      if (b.type === "tool_use") {
+        log("در حال اجرای دستور توی بلندر...", "a1");
+        const out = await blender(b.input.code);
+        if (out.startsWith("ERROR")) log(out.split("\n")[0], "err");
+        results.push({ type: "tool_result", tool_use_id: b.id, content: out });
+      }
+    }
+    messages.push({ role: "user", content: results });
+  }
+  return "ایجنت بلندر به سقف تعداد مراحل رسید.";
+}
+
+const MOD_SYSTEMS = {
+  sp: "You write GTA V single-player mods in C# using ScriptHookVDotNet v3 (.cs scripts).",
+  fivem: "You write FiveM resources in Lua: fxmanifest.lua, client.lua, server.lua, and a stream/ folder layout."
+};
+
+async function modAgent(request, report, target) {
+  const system = MOD_SYSTEMS[target] +
+    " Output every file as a block starting with a line '### FILE: <relative path>' followed by a fenced code block. " +
+    " Paths must be relative to the GTA V game folder so the user can copy the whole zip content into it: for single-player use 'scripts/RTGameMode.cs' (or similar name inside scripts/); for FiveM use 'resources/RT_Game_Mode/<file>'. " +
+    "After the files, add short install instructions in Persian under the heading '### INSTALL'. " +
+    "Use the asset names from the 3D report as model names. Do not invent native functions; use only ones you are sure exist.";
+  const resp = await claude({
+    max_tokens: 8000, system,
+    messages: [{ role: "user", content: `User request:\n${request}\n\nReport from the 3D agent:\n${report}` }]
+  });
+  return resp.content.filter(b => b.type === "text").map(b => b.text).join("");
+}
+
+const CRC = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+
+function makeZip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint16(12, 0x21, true); lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true);
+    lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+    ch.setUint16(14, 0x21, true); ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true);
+    ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + data.length;
+  }
+  let size = 0; for (const c of central) size += c.length;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, size, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
+}
+
+function download(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+}
+
+function showFiles(text) {
+  const box = $("files"); box.innerHTML = "";
+  const re = /### FILE: (.+?)\n+```[a-zA-Z]*\n([\s\S]*?)```/g;
+  const files = [];
+  let m;
+  while ((m = re.exec(text))) files.push({ name: m[1].trim().replace(/^\/+/, ""), data: m[2] });
+  const inst = (text.split("### INSTALL")[1] || "").trim();
+  if (inst) files.push({ name: "INSTALL.txt", data: inst });
+  if (!files.length) { $("outPanel").hidden = true; return; }
+
+  const zipBtn = document.createElement("button");
+  zipBtn.textContent = "دانلود RT_Game_Mode.zip";
+  zipBtn.onclick = () => download(makeZip(files), "RT_Game_Mode.zip");
+  box.appendChild(zipBtn);
+
+  const note = document.createElement("p"); note.className = "hint";
+  note.textContent = "محتوای زیپ رو توی پوشه‌ی اصلی بازی (کنار GTA5.exe) کپی کن. شامل:";
+  box.appendChild(note);
+  for (const f of files) {
+    const row = document.createElement("div"); row.className = "file";
+    const s = document.createElement("span"); s.textContent = f.name;
+    row.appendChild(s); box.appendChild(row);
+  }
+  if (inst) {
+    const p = document.createElement("p"); p.className = "hint"; p.style.whiteSpace = "pre-wrap";
+    p.textContent = inst; box.appendChild(p);
+  }
+  $("outPanel").hidden = false;
+}
+
+$("run").onclick = async () => {
+  const request = $("req").value.trim();
+  if (!$("key").value.trim()) return log("اول کلید API رو وارد کن.", "err");
+  if (!request) return log("اول بنویس چه مودی می‌خوای.", "err");
+  localStorage.setItem("gta_key", $("key").value.trim());
+  $("run").disabled = true; $("outPanel").hidden = true; $("log").textContent = "";
+  try {
+    let report = "(مرحله‌ی بلندر انجام نشد)";
+    if ($("useBlender").value === "1") {
+      if (!(await ping())) throw new Error("به بلندر وصل نشدم. بلندر باز باشه و افزونه‌ی GTA AI Bridge فعال باشه.");
+      log("ایجنت ۱ (بلندر) شروع کرد...", "a1");
+      report = await blenderAgent(request);
+      log(report, "a1");
+    }
+    log("ایجنت ۲ (کد مود) شروع کرد...", "a2");
+    const result = await modAgent(request, report, $("target").value);
+    showFiles(result);
+    log("تموم شد. دکمه‌ی دانلود زیپ پایین هست. مود فقط برای تک‌نفره یا سرور خصوصی باشه، نه GTA Online.", "a2");
+  } catch (e) {
+    log(e.message, "err");
+  } finally {
+    $("run").disabled = false;
+  }
+};
+ping();
+</script>
+</body>
+</html>
